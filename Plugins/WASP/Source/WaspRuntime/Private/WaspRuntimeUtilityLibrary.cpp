@@ -102,17 +102,17 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToSkeletonTrack(UMovieScene* InMovi
 
 		// Compute start time (in seconds) of inserted clip, accounting for start trim
 		double StartTime = 0;
-		const double StartTrimTime = FMath::Abs(Params.StartTrim); // Ensure only positive numbers
+		const double StartOffsetTime = FMath::Abs(Params.StartOffset); // Ensure only positive numbers
 		const double EndTrimTime = FMath::Abs(Params.EndTrim); // Ensure only positive numbers
 		switch (Params.TimeMode) {
 			case EWaspAnimationAddTimeMode::Precise:
-				StartTime = Params.Time - StartTrimTime; // Negative time allowed in precise mode
+				StartTime = Params.Time - StartOffsetTime; // Negative time allowed in precise mode
 				break;
 			case EWaspAnimationAddTimeMode::LastAnimationOffset:
-				StartTime = LastSectionEndTime + FMath::Abs(Params.Time) - StartTrimTime;
+				StartTime = LastSectionEndTime + FMath::Abs(Params.Time) - StartOffsetTime;
 				break;
 			case EWaspAnimationAddTimeMode::Blend:
-				StartTime = LastSectionEndTime - FMath::Abs(Params.Time) - StartTrimTime;
+				StartTime = LastSectionEndTime - FMath::Abs(Params.Time) - StartOffsetTime;
 				break;
 		}
 
@@ -123,12 +123,12 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToSkeletonTrack(UMovieScene* InMovi
 
 		// Trim the clip
 		const float AnimationDuration = Params.Animation->GetPlayLength();
-		const FFrameTime StartTrimFrameTime = FrameRate.AsFrameTime(StartTrimTime);
+		const FFrameTime StartOffsetFrameTime = FrameRate.AsFrameTime(StartOffsetTime);
 		const FFrameTime EndTrimFrameTime = FrameRate.AsFrameTime(AnimationDuration - EndTrimTime);
-		const FQualifiedFrameTime StartTrimQFrameTime = FQualifiedFrameTime(StartTrimFrameTime + StartFrame, FrameRate);
+		const FQualifiedFrameTime StartOffsetQFrameTime = FQualifiedFrameTime(StartOffsetFrameTime + StartFrame, FrameRate);
 		const FQualifiedFrameTime EndTrimQFrameTime = FQualifiedFrameTime(EndTrimFrameTime + StartFrame, FrameRate);
 		NewSection->Modify();
-		NewSection->TrimSection(StartTrimQFrameTime, true, false);
+		NewSection->TrimSection(StartOffsetQFrameTime, true, false);
 		NewSection->TrimSection(EndTrimQFrameTime, false, false);
 
 		// Move section to different row (e.g. to blend animations)
@@ -140,7 +140,7 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToSkeletonTrack(UMovieScene* InMovi
 			InTrack->UpdateEasing();
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), StartTime, LastSectionEndTime, StartTrimTime, EndTrimTime)
+		UE_LOG(LogTemp, Log, TEXT("Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), StartTime, LastSectionEndTime, StartOffsetTime, EndTrimTime)
 	}
 }
 

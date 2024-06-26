@@ -40,9 +40,9 @@ struct WASPRUNTIME_API FAnimationTrackAddParams : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
 	double Time {0.0};
 
-	/** An offset from the animation start to trim. */
+	/** An offset from the animation start. Animation before the offset is trimmed. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
-	double StartTrim {0.0};
+	double StartOffset {0.0};
 	
 	/** An offset from the animation end to trim. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
@@ -54,7 +54,7 @@ struct WASPRUNTIME_API FAnimationTrackAddParams : public FTableRowBase
 	
 	FAnimationTrackAddParams() {}
 	FAnimationTrackAddParams(UAnimSequence* InAnimation, const EWaspAnimationAddTimeMode InTimeMode, const double InTime)
-		: Animation(InAnimation), TimeMode(InTimeMode), Time(InTime), StartTrim(0.0), EndTrim(0.0), bBlend(false) {}
+		: Animation(InAnimation), TimeMode(InTimeMode), Time(InTime), StartOffset(0.0), EndTrim(0.0), bBlend(false) {}
 };
 
 /**
