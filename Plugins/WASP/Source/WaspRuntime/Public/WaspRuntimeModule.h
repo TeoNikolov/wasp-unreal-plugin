@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright "The Wallenberg AI, Autonomous Systems and Software Program". All Rights Reserved.
 
 #pragma once
 

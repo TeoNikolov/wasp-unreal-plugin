@@ -38,6 +38,9 @@ public class WaspRuntime : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
+				"LevelSequence",
+				"MovieScene",
+				"MovieSceneTracks"
 				// ... add private dependencies that you statically link with here ...
 			}
 			);
