@@ -8,22 +8,23 @@
 #include "Animation/SkeletalMeshActor.h"
 #include "Misc/FrameRate.h"
 #include "Misc/FrameTime.h"
+#include "Tracks/MovieSceneAudioTrack.h"
 #include "Tracks/MovieSceneSkeletalAnimationTrack.h"
 
-bool UWaspRuntimeUtilityLibrary::AddAnimationsToLevelSequence(ULevelSequence* InLevelSequence, UDataTable* InAnimationParams)
+bool UWaspRuntimeUtilityLibrary::AddDataToLevelSequence(ULevelSequence* InLevelSequence, UDataTable* InDataParams)
 {
 	if (!InLevelSequence)
 	{
 		return false;
 	}
 
-	if (!InAnimationParams)
+	if (!InDataParams)
 	{
 		return false;
 	}
-	static const FString ContextString(TEXT("UWaspRuntimeUtilityLibrary::AddAnimationToLevelSequence"));
+	static const FString ContextString(TEXT("UWaspRuntimeUtilityLibrary::AddDataToLevelSequence"));
 	TArray<FAnimationTrackAddParams*> ParamsArray;
-	InAnimationParams->GetAllRows<FAnimationTrackAddParams>(ContextString, ParamsArray);
+	InDataParams->GetAllRows<FAnimationTrackAddParams>(ContextString, ParamsArray);
 
 	UMovieScene* MovieScene = InLevelSequence->GetMovieScene();
 	if (!MovieScene)
@@ -31,24 +32,164 @@ bool UWaspRuntimeUtilityLibrary::AddAnimationsToLevelSequence(ULevelSequence* In
 		return false;
 	}
 
-	for (const FAnimationTrackAddParams* Params : ParamsArray)
+	for (const FAnimationTrackAddParams* ParamsPtr : ParamsArray)
 	{
-		if (FMovieSceneSpawnable* Spawnable = FindCompatibleSpawnableForAnimation(MovieScene, Params->Animation))
-		{
-			UMovieSceneSkeletalAnimationTrack* TargetTrack = FindOrCreateAnimationTrackForSpawnable(MovieScene, *Spawnable);
-			AddAnimationToAnimationTrack(MovieScene, TargetTrack, *Params);
+		const FAnimationTrackAddParams& Params = *ParamsPtr;
+		if (FMovieSceneSpawnable* Spawnable = FindCompatibleSpawnableForAnimation(MovieScene, Params.Animation))
+		{			
+			// Get the last section end frame time (in seconds)
+			const double LastSectionEndTime = GetLastSectionEndTime(UMovieSceneSkeletalAnimationTrack::StaticClass(), MovieScene);
+
+			// Calculate start time
+			const double StartTrimTime = FMath::Abs(Params.StartOffset);
+			const double EndTrimTime = FMath::Abs(Params.EndTrim);
+			double Time = 0;
+			switch (Params.TimeMode) {
+				case EWaspAnimationAddTimeMode::Precise:
+					Time = Params.Time - StartTrimTime; // Negative time allowed in precise mode
+					break;
+				case EWaspAnimationAddTimeMode::LastAnimationOffset:
+					Time = LastSectionEndTime + FMath::Abs(Params.Time) - StartTrimTime;
+					break;
+				case EWaspAnimationAddTimeMode::Blend:
+					Time = LastSectionEndTime - FMath::Abs(Params.Time) - StartTrimTime;
+					break;
+			}
+
+			// Audio
+			if (Params.Audio)
+			{
+				// Track
+				TArray<UMovieSceneTrack*> AudioTracks;
+				FTrackSearchParams SearchAudioParams;
+				SearchAudioParams.TrackType = UMovieSceneAudioTrack::StaticClass();
+				SearchAudioParams.SpawnableGuid = Spawnable->GetGuid();
+				SearchAudioParams.MovieScene = MovieScene;;
+				GetAllTracksOfType(SearchAudioParams, AudioTracks);
+				UMovieSceneAudioTrack* AudioTrack = nullptr;
+				if (AudioTracks.Num())
+				{
+					AudioTrack = Cast<UMovieSceneAudioTrack>(AudioTracks[0]);
+					check(AudioTrack);
+				}
+
+				// Params
+				FSectionInjectParams InjectParamsAudio;
+				InjectParamsAudio.Data = Params.Audio;
+				InjectParamsAudio.Track = AudioTrack;
+				InjectParamsAudio.RowIndex = 0;
+				InjectParamsAudio.Time = Time;
+				InjectParamsAudio.StartTrim = StartTrimTime;
+				InjectParamsAudio.EndTrim = EndTrimTime;
+				AddAudioToTrack(InjectParamsAudio);
+				UE_LOG(LogTemp, Log, TEXT("Injected audio: Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), InjectParamsAudio.Time, LastSectionEndTime, InjectParamsAudio.StartTrim, InjectParamsAudio.EndTrim);
+			}
+
+			// Animation
+			if (Params.Animation)
+			{
+				// Track
+				TArray<UMovieSceneTrack*> AnimationTracks;
+				FTrackSearchParams SearchAnimationParams;
+				SearchAnimationParams.TrackType = UMovieSceneSkeletalAnimationTrack::StaticClass();
+				SearchAnimationParams.SpawnableGuid = Spawnable->GetGuid();
+				SearchAnimationParams.MovieScene = MovieScene;;
+				GetAllTracksOfType(SearchAnimationParams, AnimationTracks);
+				UMovieSceneSkeletalAnimationTrack* AnimationTrack = nullptr;
+				if (AnimationTracks.Num())
+				{
+					AnimationTrack = Cast<UMovieSceneSkeletalAnimationTrack>(AnimationTracks[0]);
+					check(AnimationTrack);
+				}
+
+				// Params
+				FSectionInjectParams InjectParamsAnimation;
+				InjectParamsAnimation.Data = Params.Animation;
+				InjectParamsAnimation.Track = AnimationTrack;
+				InjectParamsAnimation.RowIndex = 0;
+				InjectParamsAnimation.Time = Time;
+				InjectParamsAnimation.StartTrim = StartTrimTime;
+				InjectParamsAnimation.EndTrim = EndTrimTime;
+				AddAnimationToTrack(InjectParamsAnimation);
+				UE_LOG(LogTemp, Log, TEXT("Injected animation: Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), InjectParamsAnimation.Time, LastSectionEndTime, InjectParamsAnimation.StartTrim, InjectParamsAnimation.EndTrim);
+			}
 		}
 	}
 
 	return true;
 }
 
-void UWaspRuntimeUtilityLibrary::GetAllTracksOfType(const FTrackSearchParams& Params, UMovieScene* InMovieScene, TArray<UMovieSceneTrack*>& OutArray)
+bool UWaspRuntimeUtilityLibrary::AddAudioToTrack(const FSectionInjectParams Params)
 {
+	UMovieSceneAudioTrack* CastTrack = Cast<UMovieSceneAudioTrack>(Params.Track);
+	if (!CastTrack)
+	{
+		return false;
+	}
+
+	USoundBase* Sound = Cast<USoundBase>(Params.Data);
+	if (!Sound)
+	{
+		return false;
+	}
+
+	// Insert section
+	CastTrack->Modify();
+	UMovieSceneSection* NewSection = CastTrack->AddNewSound(Sound, Params.GetTimeAsFrameNumber());
+
+	// Trim section
+	NewSection->Modify();
+	NewSection->TrimSection(Params.GetStartTrimFrameTime(), true, false);
+	NewSection->TrimSection(Params.GetEndTrimFrameTime(Sound->GetDuration()), false, false);
+
+	// Move section
+	NewSection->SetRowIndex(Params.RowIndex);
+	CastTrack->UpdateEasing();
+	
+	return true;
+}
+
+bool UWaspRuntimeUtilityLibrary::AddAnimationToTrack(const FSectionInjectParams Params)
+{
+	UMovieSceneSkeletalAnimationTrack* CastTrack = Cast<UMovieSceneSkeletalAnimationTrack>(Params.Track);
+	if (!CastTrack)
+	{
+		return false;
+	}
+
+	UAnimSequence* Animation = Cast<UAnimSequence>(Params.Data);
+	if (!Animation)
+	{
+		return false;
+	}
+	
+	// Insert section
+	CastTrack->Modify();
+	UMovieSceneSection* NewSection = CastTrack->AddNewAnimation(Params.GetTimeAsFrameNumber(), Animation);
+
+	// Trim section
+	NewSection->Modify();
+	NewSection->TrimSection(Params.GetStartTrimFrameTime(), true, false);
+	NewSection->TrimSection(Params.GetEndTrimFrameTime(Animation->GetPlayLength()), false, false);
+
+	// Move section
+	NewSection->SetRowIndex(Params.RowIndex);
+	CastTrack->UpdateEasing();
+	
+	return true;
+}
+
+void UWaspRuntimeUtilityLibrary::GetAllTracksOfType(const FTrackSearchParams& Params, TArray<UMovieSceneTrack*>& OutArray)
+{
+	if (!ensure(Params.MovieScene))
+	{
+		return;
+	}
+
 	// Non-spawnable tracks
 	if (Params.bSearchNonSpawnable)
 	{
-		for (UMovieSceneTrack* Track : InMovieScene->GetTracks())
+		for (UMovieSceneTrack* Track : Params.MovieScene->GetTracks())
 		{
 			if (Track->IsA(Params.TrackType))
 			{
@@ -60,8 +201,16 @@ void UWaspRuntimeUtilityLibrary::GetAllTracksOfType(const FTrackSearchParams& Pa
 	// Spawnable tracks
 	if (Params.bSearchSpawnable)
 	{
-		for (const FMovieSceneBinding Binding : InMovieScene->GetBindings())
+		for (const FMovieSceneBinding Binding : Params.MovieScene->GetBindings())
 		{
+			if (Params.SpawnableGuid.IsValid())
+			{
+				if (Binding.GetObjectGuid() != Params.SpawnableGuid)
+				{
+					continue;
+				}
+			}
+
 			for (UMovieSceneTrack* Track : Binding.GetTracks())
 			{
 				if (Track->IsA(Params.TrackType))
@@ -73,13 +222,25 @@ void UWaspRuntimeUtilityLibrary::GetAllTracksOfType(const FTrackSearchParams& Pa
 	}
 }
 
-double UWaspRuntimeUtilityLibrary::GetLastSectionEndTime(const TArray<UMovieSceneTrack*>& InTracks)
+double UWaspRuntimeUtilityLibrary::GetLastSectionEndTime(TSubclassOf<UMovieSceneTrack> TrackType, UMovieScene* InMovieScene)
 {
 	double LastSectionEndTime = 0;
 	FFrameRate FrameRate = FFrameRate(-1, -1); // Set invalid framerate
 
+	if (!InMovieScene)
+	{
+		return LastSectionEndTime;
+	}
+
+	// Find tracks to compare
+	FTrackSearchParams SearchParams;
+	SearchParams.TrackType = TrackType;
+	SearchParams.MovieScene = InMovieScene;
+	TArray<UMovieSceneTrack*> Tracks;
+	GetAllTracksOfType(SearchParams, Tracks);
+	
 	// Iterate tracks
-	for (const UMovieSceneTrack* Track : InTracks)
+	for (const UMovieSceneTrack* Track : Tracks)
 	{
 		// Ensure framerate is consistent
 		FFrameRate SectionFrameRate = Track->GetTypedOuter<UMovieScene>()->GetTickResolution();		
@@ -186,56 +347,4 @@ bool UWaspRuntimeUtilityLibrary::IsMovieSceneSpawnableCompatibleWithSkeleton(FMo
 		}
 	}
 	return false;
-}
-
-void UWaspRuntimeUtilityLibrary::AddAnimationToAnimationTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, const FAnimationTrackAddParams Params)
-{
-	if (ensure(Params.Animation) && ensure(InMovieScene) && ensure(InTrack))
-	{
-		// Get the last section end frame time (in seconds)
-		FTrackSearchParams SearchParams;
-		SearchParams.TrackType = UMovieSceneSkeletalAnimationTrack::StaticClass();
-		TArray<UMovieSceneTrack*> Tracks;
-		GetAllTracksOfType(SearchParams, InMovieScene, Tracks);
-		const double LastSectionEndTime = GetLastSectionEndTime(Tracks);
-
-		// Injection parameters
-		FSectionInjectParams InjectParams;
-		InjectParams.StartTrim = FMath::Abs(Params.StartOffset);
-		InjectParams.EndTrim = FMath::Abs(Params.EndTrim);
-		InjectParams.Track = InTrack;
-		switch (Params.TimeMode) {
-			case EWaspAnimationAddTimeMode::Precise:
-				InjectParams.Time = Params.Time - InjectParams.StartTrim; // Negative time allowed in precise mode
-				break;
-			case EWaspAnimationAddTimeMode::LastAnimationOffset:
-				InjectParams.Time = LastSectionEndTime + FMath::Abs(Params.Time) - InjectParams.StartTrim;
-				break;
-			case EWaspAnimationAddTimeMode::Blend:
-				InjectParams.Time = LastSectionEndTime - FMath::Abs(Params.Time) - InjectParams.StartTrim;
-				break;
-		}
-		
-		// Insert clip
-		const FFrameNumber StartFrame = InjectParams.GetTimeAsFrameNumber();
-		InTrack->Modify();
-		UMovieSceneSection* NewSection = InTrack->AddNewAnimation(StartFrame, Params.Animation);
-
-		// Trim clip
-		const float AnimationDuration = Params.Animation->GetPlayLength();
-		NewSection->Modify();
-		NewSection->TrimSection(InjectParams.GetStartTrimFrameTime(), true, false);
-		NewSection->TrimSection(InjectParams.GetEndTrimFrameTime(AnimationDuration), false, false);
-
-		// Move section for blending
-		UMovieSceneSkeletalAnimationSection* NewSectionCasted = Cast<UMovieSceneSkeletalAnimationSection>(NewSection);
-		if (Params.bBlend)
-		{
-			const int32 RowIndex = 0;
-			NewSectionCasted->SetRowIndex(RowIndex);
-			InTrack->UpdateEasing();
-		}
-
-		UE_LOG(LogTemp, Log, TEXT("Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), InjectParams.Time, LastSectionEndTime, InjectParams.StartTrim, InjectParams.EndTrim)
-	}
 }

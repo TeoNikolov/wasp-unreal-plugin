@@ -34,6 +34,10 @@ struct WASPRUNTIME_API FAnimationTrackAddParams : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
 	UAnimSequence* Animation { nullptr };
 
+	/** Audio clip to inject. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
+	USoundBase* Audio { nullptr };
+	
 	/** The time mode for which the Time value applies. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
 	EWaspAnimationAddTimeMode TimeMode { EWaspAnimationAddTimeMode::Precise };
@@ -59,7 +63,7 @@ struct WASPRUNTIME_API FAnimationTrackAddParams : public FTableRowBase
 		: Animation(InAnimation), TimeMode(InTimeMode), Time(InTime), StartOffset(0.0), EndTrim(0.0), bBlend(false) {}
 };
 
-USTRUCT()
+USTRUCT(BlueprintType)
 struct FSectionInjectParams
 {
 	GENERATED_BODY()
@@ -70,6 +74,9 @@ struct FSectionInjectParams
 	UPROPERTY()
 	UMovieSceneTrack* Track { nullptr };
 	
+	UPROPERTY()
+	int32 RowIndex { 0 };
+
 	UPROPERTY()
 	double Time { 0.0 };
 	
@@ -125,6 +132,14 @@ struct FTrackSearchParams
 	UPROPERTY()
 	bool bSearchSpawnable { true };
 
+	/** A Guid to filter by when spawnables are searched through. */
+	UPROPERTY()
+	FGuid SpawnableGuid { FGuid() };
+
+	/** Movie scene in which to search for tracks. */
+	UPROPERTY()
+	UMovieScene* MovieScene { nullptr };
+	
 	/** A type of track to filter by. */
 	UPROPERTY()
 	TSubclassOf<UMovieSceneTrack> TrackType { UObject::StaticClass() };
@@ -138,27 +153,23 @@ UCLASS()
 class WASPRUNTIME_API UWaspRuntimeUtilityLibrary : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
-		
-	/**
-	 * Adds an animation clip to a given skeletal track.
-	 * @param InMovieScene Movie scene in which the track is located.
-	 * @param InTrack Track into which to inject an animation clip.
-	 * @param Params Parameters that define how to add the animation to the track.
-	 * @param bBlend Whether to place and blend animation onto an existing track.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "WASP")
-	static void AddAnimationToAnimationTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, const FAnimationTrackAddParams Params);
 	
 	/** Adds a list of animations to a skeleton track in a LevelSequence, given a data table of params. */
 	UFUNCTION(BlueprintCallable, Category = "WASP")
-	static bool AddAnimationsToLevelSequence(ULevelSequence* InLevelSequence, UDataTable* InAnimationParams);
+	static bool AddDataToLevelSequence(ULevelSequence* InLevelSequence, UDataTable* InDataParams);
 
+	UFUNCTION(BlueprintCallable, Category = "WASP")
+	static bool AddAudioToTrack(const FSectionInjectParams Params);
+
+	UFUNCTION(BlueprintCallable, Category = "WASP")
+	static bool AddAnimationToTrack(const FSectionInjectParams Params);
+	
 	/** Populates an array with tracks of a given type found in a movie scene. */
 	UFUNCTION(BlueprintCallable, Category = "WASP")
-	static void GetAllTracksOfType(const FTrackSearchParams& Params, UMovieScene* InMovieScene, TArray<UMovieSceneTrack*>& OutArray);
+	static void GetAllTracksOfType(const FTrackSearchParams& Params, TArray<UMovieSceneTrack*>& OutArray);
 	
 	/** Returns the time (in seconds) of the last section end in a list of tracks. */
-	static double GetLastSectionEndTime(const TArray<UMovieSceneTrack*>& InTracks);
+	static double GetLastSectionEndTime(TSubclassOf<UMovieSceneTrack> TrackType, UMovieScene* InMovieScene);
 	
 	static UMovieSceneSkeletalAnimationTrack* FindOrCreateAnimationTrackForSpawnable(UMovieScene* InMovieScene, const FMovieSceneSpawnable& TargetSpawnable);
 	static FMovieSceneSpawnable* FindCompatibleSpawnableForAnimation(UMovieScene* InMovieScene, const UAnimSequence* InAnimation);
