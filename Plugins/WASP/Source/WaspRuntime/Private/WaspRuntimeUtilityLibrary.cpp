@@ -63,7 +63,7 @@ bool UWaspRuntimeUtilityLibrary::AddDataToLevelSequence(ULevelSequence* InLevelS
 				TArray<UMovieSceneTrack*> AudioTracks;
 				FTrackSearchParams SearchAudioParams;
 				SearchAudioParams.TrackType = UMovieSceneAudioTrack::StaticClass();
-				SearchAudioParams.SpawnableGuid = Spawnable->GetGuid();
+				SearchAudioParams.SpawnableGuid = Spawnable->GetGuid(); // Filter by spawnable
 				SearchAudioParams.MovieScene = MovieScene;;
 				GetAllTracksOfType(SearchAudioParams, AudioTracks);
 				UMovieSceneAudioTrack* AudioTrack = nullptr;
