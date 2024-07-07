@@ -7,6 +7,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "WaspRuntimeUtilityLibrary.generated.h"
 
+struct FMovieSceneSpawnable;
 class UMovieScene;
 struct FFrameNumber;
 class UMovieSceneSkeletalAnimationTrack;
@@ -57,6 +58,26 @@ struct WASPRUNTIME_API FAnimationTrackAddParams : public FTableRowBase
 		: Animation(InAnimation), TimeMode(InTimeMode), Time(InTime), StartOffset(0.0), EndTrim(0.0), bBlend(false) {}
 };
 
+USTRUCT(BlueprintType)
+struct FTrackSearchParams
+{
+
+	GENERATED_BODY()
+
+	/** Whether to search through tracks bound to non-spawnable / non-posessable objects. */
+	UPROPERTY()
+	bool bSearchNonSpawnable { true };
+
+	/** Whether to search through tracks bound to spawnable / posessable objects. */
+	UPROPERTY()
+	bool bSearchSpawnable { true };
+
+	/** A type of track to filter by. */
+	UPROPERTY()
+	TSubclassOf<UMovieSceneTrack> TrackType { UObject::StaticClass() };
+	
+};
+
 /**
  * Globally callable helper functions.
  */
@@ -64,19 +85,7 @@ UCLASS()
 class WASPRUNTIME_API UWaspRuntimeUtilityLibrary : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
-	
-	/** Adds a list of animations to a skeleton track in a LevelSequence, given a data table of params. */
-	UFUNCTION(BlueprintCallable, Category="WASP")
-	static bool AddAnimationsToLevelSequence(ULevelSequence* InLevelSequence, UDataTable* InAnimationParams);
-	
-	/** Finds a skeleton track in a level sequence to add animations to. Does not check for compatible skeleton! */
-	UFUNCTION(BlueprintCallable, Category="WASP")
-	static UMovieSceneSkeletalAnimationTrack* FindFirstSkeletonTrackInLevelSequence(const ULevelSequence* InLevelSequence);
-
-	/** Finds a skeleton track in a list of tracks to add animations to. Does not check for compatible skeleton! */
-	UFUNCTION(BlueprintCallable, Category="WASP")
-	static UMovieSceneSkeletalAnimationTrack* FindFirstSkeletonTrackInTrackList(const TArray<UMovieSceneTrack*>& InTracks);
-
+		
 	/**
 	 * Adds an animation clip to a given skeletal track.
 	 * @param InMovieScene Movie scene in which the track is located.
@@ -84,17 +93,23 @@ class WASPRUNTIME_API UWaspRuntimeUtilityLibrary : public UBlueprintFunctionLibr
 	 * @param Params Parameters that define how to add the animation to the track.
 	 * @param bBlend Whether to place and blend animation onto an existing track.
 	 */
-	UFUNCTION(BlueprintCallable, Category="WASP")
-	static void AddAnimationToSkeletonTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, const FAnimationTrackAddParams Params);
+	UFUNCTION(BlueprintCallable, Category = "WASP")
+	static void AddAnimationToAnimationTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, const FAnimationTrackAddParams Params);
+	
+	/** Adds a list of animations to a skeleton track in a LevelSequence, given a data table of params. */
+	UFUNCTION(BlueprintCallable, Category = "WASP")
+	static bool AddAnimationsToLevelSequence(ULevelSequence* InLevelSequence, UDataTable* InAnimationParams);
 
-	/**
-	 * Adds an array of animation clips to a given skeletal track.
-	 * @param InMovieScene Movie scene in which the track is located.
-	 * @param InTrack Track into which to inject an animation clip.
-	 * @param ParamsArray Array of parameters that define how to add the animations to the track.
-	 * @param bBlend Whether to place and blend animations onto a single track.
-	 */
-	UFUNCTION(BlueprintCallable, Category="WASP")
-	static void AddAnimationsToSkeletonTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, TArray<FAnimationTrackAddParams> ParamsArray);
+	/** Populates an array with tracks of a given type found in a movie scene. */
+	UFUNCTION(BlueprintCallable, Category = "WASP")
+	static void GetAllTracksOfType(const FTrackSearchParams& Params, UMovieScene* InMovieScene, TArray<UMovieSceneTrack*>& OutArray);
+
+	/** Returns the time (in seconds) of the last section end in a list of tracks. */
+	static double GetLastSectionEndTime(const TArray<UMovieSceneTrack*>& InTracks);
+	
+	static UMovieSceneSkeletalAnimationTrack* FindOrCreateAnimationTrackForSpawnable(UMovieScene* InMovieScene, const FMovieSceneSpawnable& TargetSpawnable);
+	static FMovieSceneSpawnable* FindCompatibleSpawnableForAnimation(UMovieScene* InMovieScene, const UAnimSequence* InAnimation);
+	static bool IsMovieSceneSpawnableCompatibleWithAnimation(FMovieSceneSpawnable& InSpawnable, const UAnimSequence* InAnimation);
+	static bool IsMovieSceneSpawnableCompatibleWithSkeleton(FMovieSceneSpawnable& InSpawnable, const USkeleton* InSkeleton);
 	
 };

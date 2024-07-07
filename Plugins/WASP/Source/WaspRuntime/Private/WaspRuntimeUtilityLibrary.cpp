@@ -5,6 +5,7 @@
 
 #include "LevelSequence.h"
 #include "MovieScene.h"
+#include "Animation/SkeletalMeshActor.h"
 #include "Misc/FrameRate.h"
 #include "Misc/FrameTime.h"
 #include "Tracks/MovieSceneSkeletalAnimationTrack.h"
@@ -29,69 +30,78 @@ bool UWaspRuntimeUtilityLibrary::AddAnimationsToLevelSequence(ULevelSequence* In
 	{
 		return false;
 	}
-	
-	UMovieSceneSkeletalAnimationTrack* TargetTrack = FindFirstSkeletonTrackInLevelSequence(InLevelSequence);
-	if (!TargetTrack)
-	{
-		return false;
-	}
 
 	for (const FAnimationTrackAddParams* Params : ParamsArray)
 	{
-		AddAnimationToSkeletonTrack(MovieScene, TargetTrack, *Params);
+		if (FMovieSceneSpawnable* Spawnable = FindCompatibleSpawnableForAnimation(MovieScene, Params->Animation))
+		{
+			UMovieSceneSkeletalAnimationTrack* TargetTrack = FindOrCreateAnimationTrackForSpawnable(MovieScene, *Spawnable);
+			AddAnimationToAnimationTrack(MovieScene, TargetTrack, *Params);
+		}
 	}
 
 	return true;
 }
 
-UMovieSceneSkeletalAnimationTrack* UWaspRuntimeUtilityLibrary::FindFirstSkeletonTrackInLevelSequence(const ULevelSequence* InLevelSequence)
+void UWaspRuntimeUtilityLibrary::GetAllTracksOfType(const FTrackSearchParams& Params, UMovieScene* InMovieScene, TArray<UMovieSceneTrack*>& OutArray)
 {
-	if (const UMovieScene* MovieScene = InLevelSequence->GetMovieScene())
+	// Non-spawnable tracks
+	if (Params.bSearchNonSpawnable)
 	{
-		// Find first compatible skeleton animation track in non-possessables
-		UMovieSceneSkeletalAnimationTrack* TargetTrack = FindFirstSkeletonTrackInTrackList(MovieScene->GetTracks());
-		if (TargetTrack)
+		for (UMovieSceneTrack* Track : InMovieScene->GetTracks())
 		{
-			return TargetTrack;
-		}
-
-		// Find first compatible skeleton animation track in possessables
-		for (const FMovieSceneBinding& Binding : MovieScene->GetBindings())
-		{
-			TargetTrack = FindFirstSkeletonTrackInTrackList(Binding.GetTracks());
-			if (TargetTrack)
+			if (Track->IsA(Params.TrackType))
 			{
-				return TargetTrack;
+				OutArray.Add(Track);
 			}
 		}
 	}
 
-	return nullptr;
-}
-
-UMovieSceneSkeletalAnimationTrack* UWaspRuntimeUtilityLibrary::FindFirstSkeletonTrackInTrackList(const TArray<UMovieSceneTrack*>& InTracks)
-{
-	for (UMovieSceneTrack* Track : InTracks)
+	// Spawnable tracks
+	if (Params.bSearchSpawnable)
 	{
-		if (UMovieSceneSkeletalAnimationTrack* CastedTrack = Cast<UMovieSceneSkeletalAnimationTrack>(Track))
+		for (const FMovieSceneBinding Binding : InMovieScene->GetBindings())
 		{
-			return CastedTrack;
+			for (UMovieSceneTrack* Track : Binding.GetTracks())
+			{
+				if (Track->IsA(Params.TrackType))
+				{
+					OutArray.Add(Track);
+				}
+			}
 		}
 	}
-
-	return nullptr;
 }
 
-void UWaspRuntimeUtilityLibrary::AddAnimationToSkeletonTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, const FAnimationTrackAddParams Params)
+double UWaspRuntimeUtilityLibrary::GetLastSectionEndTime(const TArray<UMovieSceneTrack*>& InTracks)
 {
-	if (ensure(Params.Animation) && ensure(InMovieScene) && ensure(InTrack))
+	double LastSectionEndTime = 0;
+	FFrameRate FrameRate = FFrameRate(-1, -1); // Set invalid framerate
+
+	// Iterate tracks
+	for (const UMovieSceneTrack* Track : InTracks)
 	{
-		// General Sequencer variables
-		const FFrameRate FrameRate = InMovieScene->GetTickResolution();
-		
-		// Get the last section end frame time (in seconds)
-		double LastSectionEndTime = 0;
-		for (UMovieSceneSection* Section : InTrack->GetAllSections())
+		// Ensure framerate is consistent
+		FFrameRate SectionFrameRate = Track->GetTypedOuter<UMovieScene>()->GetTickResolution();		
+		if (FrameRate.IsValid())
+		{
+			ensure(SectionFrameRate.IsValid());
+			ensure(FrameRate == SectionFrameRate);
+		}
+		else
+		{
+			FrameRate = SectionFrameRate;
+		}
+
+		// We should have a valid framerate
+		if (!ensure(FrameRate.IsValid()))
+		{
+			UE_LOG(LogTemp, Error, TEXT("The track framerate is invalid!"));
+			return 0;
+		}
+
+		// Iterate sections
+		for (const UMovieSceneSection* Section : Track->GetAllSections())
 		{
 			if (Section->HasEndFrame())
 			{
@@ -99,6 +109,98 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToSkeletonTrack(UMovieScene* InMovi
 				LastSectionEndTime = FMath::Max(LastSectionEndTime, SectionEndTime);
 			}
 		}
+	}
+	
+	return LastSectionEndTime;
+}
+
+UMovieSceneSkeletalAnimationTrack* UWaspRuntimeUtilityLibrary::FindOrCreateAnimationTrackForSpawnable(UMovieScene* InMovieScene, const FMovieSceneSpawnable& TargetSpawnable)
+{
+	UMovieSceneSkeletalAnimationTrack* SkeletalTrack = nullptr;
+
+	// Search for any skeletal track
+	if (FMovieSceneBinding* Binding = InMovieScene->FindBinding(TargetSpawnable.GetGuid()))
+	{
+		for (UMovieSceneTrack* Track : Binding->GetTracks())
+		{
+			SkeletalTrack = Cast<UMovieSceneSkeletalAnimationTrack>(Track);
+			if (SkeletalTrack)
+			{
+				return SkeletalTrack;
+			}
+		}
+	}
+
+	// No track found; create one
+	// TODO: create track
+
+	ensure(SkeletalTrack); // We should have a track by now
+	return SkeletalTrack;
+}
+
+FMovieSceneSpawnable* UWaspRuntimeUtilityLibrary::FindCompatibleSpawnableForAnimation(UMovieScene* InMovieScene, const UAnimSequence* InAnimation)
+{
+	for (FMovieSceneBinding Binding : InMovieScene->GetBindings())
+	{
+		if (FMovieSceneSpawnable* Spawnable = InMovieScene->FindSpawnable(Binding.GetObjectGuid()))
+		{
+			if (IsMovieSceneSpawnableCompatibleWithAnimation(*Spawnable, InAnimation))
+			{
+				return Spawnable;
+			}
+		}
+	}
+	return nullptr;
+}
+
+bool UWaspRuntimeUtilityLibrary::IsMovieSceneSpawnableCompatibleWithAnimation(FMovieSceneSpawnable& InSpawnable, const UAnimSequence* InAnimation)
+{
+	if (InAnimation)
+	{
+		return IsMovieSceneSpawnableCompatibleWithSkeleton(InSpawnable, InAnimation->GetSkeleton());
+	}
+	return false;
+}
+
+bool UWaspRuntimeUtilityLibrary::IsMovieSceneSpawnableCompatibleWithSkeleton(FMovieSceneSpawnable& InSpawnable, const USkeleton* InSkeleton)
+{
+	if (InSkeleton)
+	{
+		if (TObjectPtr<ASkeletalMeshActor> SkeletalMeshActor = Cast<ASkeletalMeshActor>(InSpawnable.GetObjectTemplate()))
+		{
+			if (TObjectPtr<USkeletalMeshComponent> SkeletalMeshComponent = SkeletalMeshActor->GetSkeletalMeshComponent())
+			{
+				if (TObjectPtr<USkeletalMesh> SkeletalMesh = SkeletalMeshComponent->GetSkeletalMeshAsset())
+				{
+					if (TObjectPtr<USkeleton> Skeleton = SkeletalMesh->GetSkeleton())
+					{
+						FString SkeletonAssetName = FAssetData(Skeleton).GetExportTextName();
+						FString TargetSkeletonAssetName = FAssetData(InSkeleton).GetExportTextName();
+						if (SkeletonAssetName == TargetSkeletonAssetName)
+						{
+							return true;
+						}
+					}
+				}
+			}
+		}
+	}
+	return false;
+}
+
+void UWaspRuntimeUtilityLibrary::AddAnimationToAnimationTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, const FAnimationTrackAddParams Params)
+{
+	if (ensure(Params.Animation) && ensure(InMovieScene) && ensure(InTrack))
+	{
+		// General Sequencer variables
+		const FFrameRate FrameRate = InMovieScene->GetTickResolution();
+		
+		// Get the last section end frame time (in seconds)
+		FTrackSearchParams SearchParams;
+		SearchParams.TrackType = UMovieSceneSkeletalAnimationTrack::StaticClass();
+		TArray<UMovieSceneTrack*> Tracks;
+		GetAllTracksOfType(SearchParams, InMovieScene, Tracks);
+		const double LastSectionEndTime = GetLastSectionEndTime(Tracks);
 
 		// Compute start time (in seconds) of inserted clip, accounting for start trim
 		double StartTime = 0;
@@ -141,13 +243,5 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToSkeletonTrack(UMovieScene* InMovi
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), StartTime, LastSectionEndTime, StartOffsetTime, EndTrimTime)
-	}
-}
-
-void UWaspRuntimeUtilityLibrary::AddAnimationsToSkeletonTrack(UMovieScene* InMovieScene, UMovieSceneSkeletalAnimationTrack* InTrack, TArray<FAnimationTrackAddParams> ParamsArray)
-{
-	for (const FAnimationTrackAddParams Params : ParamsArray)
-	{
-		AddAnimationToSkeletonTrack(InMovieScene, InTrack, Params);
 	}
 }
