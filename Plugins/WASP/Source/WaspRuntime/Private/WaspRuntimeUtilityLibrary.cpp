@@ -192,9 +192,6 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToAnimationTrack(UMovieScene* InMov
 {
 	if (ensure(Params.Animation) && ensure(InMovieScene) && ensure(InTrack))
 	{
-		// General Sequencer variables
-		const FFrameRate FrameRate = InMovieScene->GetTickResolution();
-		
 		// Get the last section end frame time (in seconds)
 		FTrackSearchParams SearchParams;
 		SearchParams.TrackType = UMovieSceneSkeletalAnimationTrack::StaticClass();
@@ -202,38 +199,35 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToAnimationTrack(UMovieScene* InMov
 		GetAllTracksOfType(SearchParams, InMovieScene, Tracks);
 		const double LastSectionEndTime = GetLastSectionEndTime(Tracks);
 
-		// Compute start time (in seconds) of inserted clip, accounting for start trim
-		double StartTime = 0;
-		const double StartOffsetTime = FMath::Abs(Params.StartOffset); // Ensure only positive numbers
-		const double EndTrimTime = FMath::Abs(Params.EndTrim); // Ensure only positive numbers
+		// Injection parameters
+		FSectionInjectParams InjectParams;
+		InjectParams.StartTrim = FMath::Abs(Params.StartOffset);
+		InjectParams.EndTrim = FMath::Abs(Params.EndTrim);
+		InjectParams.Track = InTrack;
 		switch (Params.TimeMode) {
 			case EWaspAnimationAddTimeMode::Precise:
-				StartTime = Params.Time - StartOffsetTime; // Negative time allowed in precise mode
+				InjectParams.Time = Params.Time - InjectParams.StartTrim; // Negative time allowed in precise mode
 				break;
 			case EWaspAnimationAddTimeMode::LastAnimationOffset:
-				StartTime = LastSectionEndTime + FMath::Abs(Params.Time) - StartOffsetTime;
+				InjectParams.Time = LastSectionEndTime + FMath::Abs(Params.Time) - InjectParams.StartTrim;
 				break;
 			case EWaspAnimationAddTimeMode::Blend:
-				StartTime = LastSectionEndTime - FMath::Abs(Params.Time) - StartOffsetTime;
+				InjectParams.Time = LastSectionEndTime - FMath::Abs(Params.Time) - InjectParams.StartTrim;
 				break;
 		}
-
-		// Insert the clip at start time
-		const FFrameNumber StartFrame = (StartTime * FrameRate).RoundToFrame();
+		
+		// Insert clip
+		const FFrameNumber StartFrame = InjectParams.GetTimeAsFrameNumber();
 		InTrack->Modify();
 		UMovieSceneSection* NewSection = InTrack->AddNewAnimation(StartFrame, Params.Animation);
 
-		// Trim the clip
+		// Trim clip
 		const float AnimationDuration = Params.Animation->GetPlayLength();
-		const FFrameTime StartOffsetFrameTime = FrameRate.AsFrameTime(StartOffsetTime);
-		const FFrameTime EndTrimFrameTime = FrameRate.AsFrameTime(AnimationDuration - EndTrimTime);
-		const FQualifiedFrameTime StartOffsetQFrameTime = FQualifiedFrameTime(StartOffsetFrameTime + StartFrame, FrameRate);
-		const FQualifiedFrameTime EndTrimQFrameTime = FQualifiedFrameTime(EndTrimFrameTime + StartFrame, FrameRate);
 		NewSection->Modify();
-		NewSection->TrimSection(StartOffsetQFrameTime, true, false);
-		NewSection->TrimSection(EndTrimQFrameTime, false, false);
+		NewSection->TrimSection(InjectParams.GetStartTrimFrameTime(), true, false);
+		NewSection->TrimSection(InjectParams.GetEndTrimFrameTime(AnimationDuration), false, false);
 
-		// Move section to different row (e.g. to blend animations)
+		// Move section for blending
 		UMovieSceneSkeletalAnimationSection* NewSectionCasted = Cast<UMovieSceneSkeletalAnimationSection>(NewSection);
 		if (Params.bBlend)
 		{
@@ -242,6 +236,6 @@ void UWaspRuntimeUtilityLibrary::AddAnimationToAnimationTrack(UMovieScene* InMov
 			InTrack->UpdateEasing();
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), StartTime, LastSectionEndTime, StartOffsetTime, EndTrimTime)
+		UE_LOG(LogTemp, Log, TEXT("Start %.4f | LastSectionEnd %.4f | StartTrim %.4f | EndTrim %.4f"), InjectParams.Time, LastSectionEndTime, InjectParams.StartTrim, InjectParams.EndTrim)
 	}
 }

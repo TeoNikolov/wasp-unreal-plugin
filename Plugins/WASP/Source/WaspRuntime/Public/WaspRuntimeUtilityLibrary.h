@@ -3,12 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "MovieScene.h"
+#include "MovieSceneTrack.h"
 #include "Engine/DataTable.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "WaspRuntimeUtilityLibrary.generated.h"
 
 struct FMovieSceneSpawnable;
-class UMovieScene;
 struct FFrameNumber;
 class UMovieSceneSkeletalAnimationTrack;
 class ULevelSequence;
@@ -29,33 +30,85 @@ struct WASPRUNTIME_API FAnimationTrackAddParams : public FTableRowBase
 {
 	GENERATED_BODY()
 	
-	/** Animation clip to inject into the animation track. */
+	/** Animation clip to inject. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
-	UAnimSequence* Animation {nullptr};
+	UAnimSequence* Animation { nullptr };
 
 	/** The time mode for which the Time value applies. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
-	EWaspAnimationAddTimeMode TimeMode {EWaspAnimationAddTimeMode::Precise};
+	EWaspAnimationAddTimeMode TimeMode { EWaspAnimationAddTimeMode::Precise };
 	
 	/** The time at which to inject the animation clip in seconds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
-	double Time {0.0};
+	double Time { 0.0 };
 
 	/** An offset from the animation start. Animation before the offset is trimmed. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
-	double StartOffset {0.0};
+	double StartOffset { 0.0 };
 	
 	/** An offset from the animation end to trim. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
-	double EndTrim {0.0};
+	double EndTrim { 0.0 };
 
 	/** Whether the animation should be blended. TODO: Define how it will be blended. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WASP")
-	bool bBlend {false};
+	bool bBlend { false };
 	
 	FAnimationTrackAddParams() {}
 	FAnimationTrackAddParams(UAnimSequence* InAnimation, const EWaspAnimationAddTimeMode InTimeMode, const double InTime)
 		: Animation(InAnimation), TimeMode(InTimeMode), Time(InTime), StartOffset(0.0), EndTrim(0.0), bBlend(false) {}
+};
+
+USTRUCT()
+struct FSectionInjectParams
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	UObject* Data { nullptr };
+	
+	UPROPERTY()
+	UMovieSceneTrack* Track { nullptr };
+	
+	UPROPERTY()
+	double Time { 0.0 };
+	
+	UPROPERTY()
+	double StartTrim { 0.0 };
+	
+	UPROPERTY()
+	double EndTrim { 0.0 };
+	
+	FFrameRate GetFrameRate() const
+	{
+		FFrameRate FrameRate = FFrameRate(-1, -1);
+		if (Track)
+		{
+			if (const UMovieScene* MovieScene = Track->GetTypedOuter<UMovieScene>())
+			{
+				FrameRate = MovieScene->GetTickResolution();
+			}
+		}
+		return FrameRate;
+	}
+
+	FFrameNumber GetTimeAsFrameNumber() const
+	{
+		return (Time * GetFrameRate()).RoundToFrame();
+	}
+
+	FQualifiedFrameTime GetStartTrimFrameTime() const
+	{
+		const FFrameTime StartOffsetFrameTime = GetFrameRate().AsFrameTime(StartTrim);
+		return FQualifiedFrameTime(StartOffsetFrameTime + GetTimeAsFrameNumber(), GetFrameRate());
+	}
+
+	FQualifiedFrameTime GetEndTrimFrameTime(const double SectionDuration) const
+	{
+		const FFrameTime EndTrimFrameTime = GetFrameRate().AsFrameTime(SectionDuration - EndTrim);
+		return FQualifiedFrameTime(EndTrimFrameTime + GetTimeAsFrameNumber(), GetFrameRate());
+	}
+	
 };
 
 USTRUCT(BlueprintType)
@@ -103,7 +156,7 @@ class WASPRUNTIME_API UWaspRuntimeUtilityLibrary : public UBlueprintFunctionLibr
 	/** Populates an array with tracks of a given type found in a movie scene. */
 	UFUNCTION(BlueprintCallable, Category = "WASP")
 	static void GetAllTracksOfType(const FTrackSearchParams& Params, UMovieScene* InMovieScene, TArray<UMovieSceneTrack*>& OutArray);
-
+	
 	/** Returns the time (in seconds) of the last section end in a list of tracks. */
 	static double GetLastSectionEndTime(const TArray<UMovieSceneTrack*>& InTracks);
 	
